@@ -338,21 +338,27 @@ def pipeline(
 @cli.command()
 @click.option("--concept", "concept_opt", type=str, required=False, default=None)
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+@click.option("--all", "search_all", is_flag=True, help="Search across all concepts")
 @click.argument("concept", type=str, required=False)
-def search(concept_opt: Optional[str], as_json: bool, concept: Optional[str]) -> None:
+def search(concept_opt: Optional[str], as_json: bool, search_all: bool, concept: Optional[str]) -> None:
     """Query SQLite for artifacts matching a concept."""
 
     chosen = concept_opt or concept
-    if not chosen:
-        raise click.ClickException("Provide a concept via --concept or as a positional argument")
-
+    
     cfg = Config()
     audit = AuditLogger(cfg)
-
     registry = Registry(cfg)
-    results = registry.search(chosen)
+    
+    if search_all:
+        results = registry.search_all()
+        search_target = "all"
+    elif chosen:
+        results = registry.search(chosen)
+        search_target = chosen
+    else:
+        raise click.ClickException("Provide a concept or use --all")
 
-    audit.log("search", {"concept": chosen, "count": len(results)})
+    audit.log("search", {"concept": search_target, "count": len(results)})
 
     if as_json:
         click.echo(

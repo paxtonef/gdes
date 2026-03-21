@@ -132,3 +132,24 @@ class Registry:
                 """
             ).fetchone()
         return int(n)
+
+    def search_all(self) -> List[CanonicalArtifact]:
+        """Retrieve all artifacts across all concepts"""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM artifacts ORDER BY created_at DESC"
+            )
+            rows = cursor.fetchall()
+        
+        return [
+            CanonicalArtifact(
+                id=r["id"],
+                source=r["source"],
+                created_at=datetime.fromisoformat(r["created_at"]),
+                content=r["content"],
+                concept=r["concept"],
+                type=r["type"],
+                metadata=json.loads(r["metadata_json"])
+            )
+            for r in rows
+        ]
