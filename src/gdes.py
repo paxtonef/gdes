@@ -6,9 +6,10 @@ from pathlib import Path
 from typing import Optional, Type, TypeVar
 
 import click
+import sys
 
 from .concept_a import Ingestor
-from .concept_b import Librarian
+from .concept_b import Librarian, ConceptValidationError
 from .concept_c import Validator
 from .concept_d import Registry
 from .core import AuditLogger, Config
@@ -122,7 +123,7 @@ def tag(artifact_id: Optional[str]) -> None:
     )
 
     librarian = Librarian(cfg)
-    canonical = librarian.tag(partial=partial, concept_name=concept_name, type=artifact_type)
+    canonical = librarian.tag(partial=partial, concept_name=concept_name, artifact_type=artifact_type)
 
     out_path = layout["canonical"] / f"{canonical.id}.json"
     _save_model_json(out_path, canonical)
@@ -132,7 +133,7 @@ def tag(artifact_id: Optional[str]) -> None:
         {
             "artifact_id": canonical.id,
             "concept": canonical.concept,
-            "type": canonical.type,
+            "type": canonical.artifact_type,
             "in_path": str(partial_path),
             "out_path": str(out_path),
         },
@@ -271,11 +272,22 @@ def pipeline(
             type=click.Choice(["code", "markdown", "config", "chat_export", "snippet"], case_sensitive=False),
         )
 
-    canonical = Librarian(cfg).tag(partial=partial, concept_name=concept_name, type=artifact_type)
+    try:
+        canonical = Librarian(cfg).tag(partial=partial, concept_name=concept_name, artifact_type=artifact_type)
+    except ConceptValidationError as e:
+        click.echo(f"  ❌ B concept validation failed")
+        click.echo(f"\n{e}")
+        # PRIORITY 2: Cleanup partial on failure
+        partial_temp = layout["partials"] / f"{partial.id}.json"
+        if partial_temp.exists():
+            partial_temp.unlink()
+            click.echo(f"  🧹 Rolled back: {partial_temp.name}")
+        sys.exit(1)
+    
     canonical_path = layout["canonical"] / f"{canonical.id}.json"
     _save_model_json(canonical_path, canonical)
 
-    click.echo(f"  ✅ B c={canonical.concept} t={canonical.type}")
+    click.echo(f"  ✅ B c={canonical.concept} t={canonical.artifact_type}")
 
     report = Validator(cfg).validate(canonical)
     report_path = layout["reports"] / f"{report.artifact_id}.json"
@@ -314,7 +326,7 @@ def pipeline(
         {
             "artifact_id": canonical.id,
             "concept": canonical.concept,
-            "type": canonical.type,
+            "type": canonical.artifact_type,
             "result": report.result,
         },
     )

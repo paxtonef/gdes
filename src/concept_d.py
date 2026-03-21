@@ -73,7 +73,7 @@ class Registry:
                     else str(artifact.created_at),
                     artifact.content,
                     artifact.concept,
-                    artifact.type,
+                    artifact.artifact_type,
                     json.dumps(artifact.metadata, ensure_ascii=False),
                 ),
             )

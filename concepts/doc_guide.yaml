@@ -1,0 +1,27 @@
+concept_id: doc_guide
+identity:
+  name: Documentation Guide
+  type: Documentation
+purpose:
+  solves: "Explain system architecture"
+  without_this: "Users cannot understand GDES"
+  success_signal: "Clear explanation produced"
+placement:
+  layer: Output
+  upstream: ["my_tool"]
+  downstream: ["Human"]
+contract:
+  input:
+    format: "markdown"
+  output:
+    format: "markdown"
+responsibilities:
+  - "Explain concepts"
+  - "Document boundaries"
+boundaries:
+  explicitly_forbidden:
+    - "code_execution"
+    - "database_persistence"
+  drift_warnings:
+    - "Do not add CLI commands"
+    - "Do not include implementation code"
