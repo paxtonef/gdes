@@ -361,8 +361,14 @@ def search(concept_opt: Optional[str], as_json: bool, search_all: bool, concept:
     audit.log("search", {"concept": search_target, "count": len(results)})
 
     if as_json:
+        payload = []
+        for a in results:
+            d = a.model_dump(mode="json")
+            if "artifact_type" in d and "type" not in d:
+                d["type"] = d["artifact_type"]
+            payload.append(d)
         click.echo(
-            json.dumps([a.model_dump(mode="json") for a in results], ensure_ascii=False)
+            json.dumps(payload, ensure_ascii=False)
         )
         return
 
