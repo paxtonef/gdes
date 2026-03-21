@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 
 from .core import Config
-from .models import CanonicalArtifact, ValidationReport
+from .artifact import CanonicalArtifact, ValidationReport
 
 
 _FORBIDDEN_WORDS = {"password", "secret", "apikey", "api_key", "token"}
@@ -44,6 +44,50 @@ class Validator:
         
         return paths
 
+    def _load_concept_with_inheritance(self, concept_name: str, visited: set = None) -> Dict[str, Any]:
+        """Load concept with inheritance (copied from Librarian)"""
+        if visited is None:
+            visited = set()
+        
+        if concept_name in visited:
+            raise ValueError(f"Circular inheritance: {concept_name}")
+        visited.add(concept_name)
+        
+        concept_file = self._find_concept_file(concept_name)
+        if not concept_file:
+            raise ValueError(f"Concept {concept_name} not found")
+        
+        with open(concept_file) as f:
+            concept = yaml.safe_load(f)
+        
+        # Handle inheritance like Librarian does
+        if 'extends' in concept:
+            base_name = concept['extends']
+            base_concept = self._load_concept_with_inheritance(base_name, visited)
+            
+            merged = {}
+            merged['concept_id'] = concept['concept_id']
+            merged['identity'] = concept.get('identity', base_concept.get('identity', {}))
+            merged['purpose'] = concept.get('purpose', base_concept.get('purpose', {}))
+            
+            merged['contract'] = base_concept.get('contract', {}).copy()
+            if 'contract' in concept:
+                if 'allowed_types' in concept['contract']:
+                    merged['contract']['allowed_types'] = concept['contract']['allowed_types']
+            
+            merged['responsibilities'] = concept.get('responsibilities', [])
+            
+            merged['boundaries'] = base_concept.get('boundaries', {}).copy()
+            if 'boundaries' in concept:
+                base_forbidden = merged['boundaries'].get('system_wide_forbidden', [])
+                child_forbidden = concept['boundaries'].get('own_forbidden', [])
+                merged['boundaries']['system_wide_forbidden'] = list(set(base_forbidden + child_forbidden))
+            
+            return merged
+        
+        return concept
+
+
     def _find_concept_file(self, concept_name: str) -> Optional[Path]:
         """Find concept YAML using multi-path resolution"""
         for base in self._resolve_concept_paths():
@@ -57,15 +101,11 @@ class Validator:
         start_time = datetime.utcnow()
 
         # Find concept using multi-path resolution
-        concept_file = self._find_concept_file(canonical.concept)
-        
-        if not concept_file:
-            # PRIORITY 1: Controlled failure, not crash
-            paths_checked = [str(b / f"{canonical.concept}.yaml") for b in self._resolve_concept_paths()]
-            violations.append(
-                f"Concept '{canonical.concept}' not found for validation. "
-                f"Checked: {', '.join(paths_checked)}"
-            )
+        # Load concept with inheritance resolution
+        try:
+            concept_data = self._load_concept_with_inheritance(canonical.concept)
+        except ValueError as e:
+            violations.append(f"Cannot load concept: {e}")
             duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
             return ValidationReport(
                 artifact_id=canonical.id,
@@ -75,9 +115,8 @@ class Validator:
                 violations=violations,
                 duration_ms=duration_ms,
             )
-
-        with concept_file.open("r", encoding="utf-8") as f:
-            concept_data: Dict[str, Any] = yaml.safe_load(f) or {}
+        
+        # concept_data already loaded with inheritance above
 
         # Run validation checks
         checks: Dict[str, Any] = {}
@@ -92,8 +131,7 @@ class Validator:
         
         # Boundaries check
         boundaries = concept_data.get("boundaries", {})
-        forbidden = boundaries.get("explicitly_forbidden", [])
-        
+
         # Content scan for forbidden patterns
         content_lower = canonical.content.lower()
         found_forbidden = [w for w in _FORBIDDEN_WORDS if w in content_lower]

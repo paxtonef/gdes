@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from .core import Config
-from .models import CanonicalArtifact, ValidationReport
+from .artifact import CanonicalArtifact, ValidationReport
 
 
 class Registry:
@@ -110,7 +110,7 @@ class Registry:
                     created_at=datetime.fromisoformat(r["created_at"]),
                     content=r["content"],
                     concept=r["concept"],
-                    type=r["type"],
+                    artifact_type=r["type"],
                     metadata=json.loads(r["metadata_json"]),
                 )
             )
@@ -148,7 +148,7 @@ class Registry:
                 created_at=datetime.fromisoformat(r["created_at"]),
                 content=r["content"],
                 concept=r["concept"],
-                type=r["type"],
+                artifact_type=r["type"],
                 metadata=json.loads(r["metadata_json"])
             )
             for r in rows

@@ -13,7 +13,7 @@ from .concept_b import Librarian, ConceptValidationError
 from .concept_c import Validator
 from .concept_d import Registry
 from .core import AuditLogger, Config
-from .models import CanonicalArtifact, PartialArtifact, ValidationReport
+from .artifact import CanonicalArtifact, PartialArtifact, ValidationReport
 
 
 T = TypeVar("T")
