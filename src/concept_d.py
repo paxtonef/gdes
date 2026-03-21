@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from .core import Config
-from .models import CanonicalArtifact, ValidationReport
+from .artifact import CanonicalArtifact, ValidationReport
 
 
 class Registry:
@@ -73,7 +73,7 @@ class Registry:
                     else str(artifact.created_at),
                     artifact.content,
                     artifact.concept,
-                    artifact.type,
+                    artifact.artifact_type,
                     json.dumps(artifact.metadata, ensure_ascii=False),
                 ),
             )
@@ -110,7 +110,7 @@ class Registry:
                     created_at=datetime.fromisoformat(r["created_at"]),
                     content=r["content"],
                     concept=r["concept"],
-                    type=r["type"],
+                    artifact_type=r["type"],
                     metadata=json.loads(r["metadata_json"]),
                 )
             )
@@ -132,3 +132,24 @@ class Registry:
                 """
             ).fetchone()
         return int(n)
+
+    def search_all(self) -> List[CanonicalArtifact]:
+        """Retrieve all artifacts across all concepts"""
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM artifacts ORDER BY created_at DESC"
+            )
+            rows = cursor.fetchall()
+        
+        return [
+            CanonicalArtifact(
+                id=r["id"],
+                source=r["source"],
+                created_at=datetime.fromisoformat(r["created_at"]),
+                content=r["content"],
+                concept=r["concept"],
+                artifact_type=r["type"],
+                metadata=json.loads(r["metadata_json"])
+            )
+            for r in rows
+        ]

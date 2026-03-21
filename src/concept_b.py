@@ -1,71 +1,83 @@
-from __future__ import annotations
-
-from pathlib import Path
-from typing import Any, Dict, Optional
-
+"""Concept B: Librarian - Multi-concept governance with graceful validation"""
 import yaml
+from pathlib import Path
+from typing import List
 
-from .core import Config
-from .models import ArtifactType, CanonicalArtifact, PartialArtifact
+from .artifact import CanonicalArtifact, PartialArtifact
 
-
-_ALLOWED_TYPES = {"code", "markdown", "config", "chat_export", "snippet"}
-
+class ConceptValidationError(Exception):
+    """Controlled failure for concept validation - no traceback"""
+    pass
 
 class Librarian:
-    def __init__(self, config: Optional[Config] = None) -> None:
-        self._config = config or Config()
-        self._config.ensure_dirs()
+    def __init__(self, config):
+        self._config = config
 
-    def _concept_path(self, concept_name: str) -> Path:
-        base = self._config.paths.concepts
-        candidates = [
-            base / f"{concept_name}.yaml",
-            base / f"{concept_name}.yml",
-        ]
-        for p in candidates:
-            if p.exists() and p.is_file():
-                return p
-        return candidates[0]
+    def _resolve_concept_paths(self) -> List[Path]:
+        """Deterministic path resolution"""
+        paths = []
 
-    def load_concepts(self) -> Dict[str, Dict[str, Any]]:
-        concepts: Dict[str, Dict[str, Any]] = {}
-        for p in sorted(self._config.paths.concepts.glob("*.y*ml")):
-            if not p.is_file():
-                continue
-            with p.open("r", encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
-            concepts[p.stem] = data
-        return concepts
+        # 1. project-local
+        paths.append(Path.cwd() / "concepts")
 
-    def tag(
-        self,
-        partial: PartialArtifact,
-        concept_name: str,
-        type: ArtifactType,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> CanonicalArtifact:
-        if str(type) not in _ALLOWED_TYPES:
-            raise ValueError(f"Invalid type: {type}. Allowed: {sorted(_ALLOWED_TYPES)}")
+        # 2. config (optional)
+        if hasattr(self._config, "paths") and hasattr(self._config.paths, "concepts"):
+            paths.append(Path(self._config.paths.concepts).expanduser())
 
-        concept_file = self._concept_path(concept_name)
-        if not concept_file.exists():
-            raise FileNotFoundError(
-                f"Concept YAML not found for '{concept_name}' in {self._config.paths.concepts}"
+        # 3. fallback
+        paths.append(Path.home() / ".gdes" / "concepts")
+
+        return paths
+
+    def tag(self, partial, concept_name: str, artifact_type: str):
+        """Tag partial artifact into canonical form"""
+        concept_paths = self._resolve_concept_paths()
+        concept_file = None
+        checked_paths = []
+
+        for path in concept_paths:
+            candidate = path / f"{concept_name}.yaml"
+            checked_paths.append(str(candidate))
+            if candidate.exists():
+                concept_file = candidate
+                break
+
+        if not concept_file:
+            error_msg = f"Concept '{concept_name}' not found.\nPaths checked:\n"
+            for p in checked_paths:
+                error_msg += f"  - {p}\n"
+            raise ConceptValidationError(error_msg)
+
+        with open(concept_file, "r", encoding="utf-8") as f:
+            concept = yaml.safe_load(f) or {}
+
+        if "boundaries" not in concept:
+            raise ConceptValidationError(
+                f"Concept '{concept_name}' missing required 'boundaries:' section"
             )
 
-        with concept_file.open("r", encoding="utf-8") as f:
-            concept_data = yaml.safe_load(f) or {}
+        allowed_types = concept.get("allowed_types")
+        contract = concept.get("contract") or {}
+        if allowed_types is None and isinstance(contract, dict):
+            allowed_types = contract.get("allowed_types")
+        if isinstance(allowed_types, list) and allowed_types and artifact_type not in allowed_types:
+            raise ConceptValidationError(
+                f"Type '{artifact_type}' not allowed for concept '{concept_name}'. Allowed: {allowed_types}"
+            )
 
-        if "boundaries" not in concept_data:
-            raise ValueError(f"Concept '{concept_name}' missing required 'boundaries:' section")
+        if isinstance(partial, PartialArtifact):
+            src = partial.source
+            created_at = partial.created_at
+        else:
+            src = getattr(partial, "source", "unknown")
+            created_at = getattr(partial, "created_at", None)
 
         return CanonicalArtifact(
             id=partial.id,
-            source=partial.source,
-            created_at=partial.created_at,
+            source=src,
+            created_at=created_at,
             content=partial.content,
             concept=concept_name,
-            type=type,
-            metadata=metadata or {},
+            artifact_type=artifact_type,
+            metadata=getattr(partial, "metadata", {}),
         )

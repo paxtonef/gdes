@@ -1,0 +1,29 @@
+concept_id: my_tool
+identity:
+  name: My Tool
+  type: Code
+purpose:
+  solves: "Testing GDES"
+  without_this: "Cannot test"
+  success_signal: "Works"
+placement:
+  layer: Input
+  upstream: ["Human"]
+  downstream: ["Output"]
+contract:
+  allowed_types:
+    - code
+    - snippet
+    - config
+  input:
+    format: "text"
+  output:
+    format: "json"
+responsibilities:
+  - "Generate code"
+  - "Store safely"
+boundaries:
+  explicitly_forbidden:
+    - "database_persistence"
+  drift_warnings:
+    - "Do not add web server"

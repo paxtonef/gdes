@@ -6,13 +6,14 @@ from pathlib import Path
 from typing import Optional, Type, TypeVar
 
 import click
+import sys
 
 from .concept_a import Ingestor
-from .concept_b import Librarian
+from .concept_b import Librarian, ConceptValidationError
 from .concept_c import Validator
 from .concept_d import Registry
 from .core import AuditLogger, Config
-from .models import CanonicalArtifact, PartialArtifact, ValidationReport
+from .artifact import CanonicalArtifact, PartialArtifact, ValidationReport
 
 
 T = TypeVar("T")
@@ -118,11 +119,11 @@ def tag(artifact_id: Optional[str]) -> None:
     concept_name = click.prompt("Concept", type=str)
     artifact_type = click.prompt(
         "Type",
-        type=click.Choice(["code", "markdown", "config", "chat_export", "snippet"], case_sensitive=False),
+        type=str,  # Concept-driven: validated at Stage B,
     )
 
     librarian = Librarian(cfg)
-    canonical = librarian.tag(partial=partial, concept_name=concept_name, type=artifact_type)
+    canonical = librarian.tag(partial=partial, concept_name=concept_name, artifact_type=artifact_type)
 
     out_path = layout["canonical"] / f"{canonical.id}.json"
     _save_model_json(out_path, canonical)
@@ -132,7 +133,7 @@ def tag(artifact_id: Optional[str]) -> None:
         {
             "artifact_id": canonical.id,
             "concept": canonical.concept,
-            "type": canonical.type,
+            "type": canonical.artifact_type,
             "in_path": str(partial_path),
             "out_path": str(out_path),
         },
@@ -226,7 +227,7 @@ def store(artifact_id: Optional[str]) -> None:
     "-t",
     "--type",
     "artifact_type",
-    type=click.Choice(["code", "markdown", "config", "chat_export", "snippet"], case_sensitive=False),
+    type=str,  # Concept-driven: validated at Stage B,
     required=False,
     default=None,
 )
@@ -268,14 +269,25 @@ def pipeline(
     if artifact_type is None:
         artifact_type = click.prompt(
             "Type",
-            type=click.Choice(["code", "markdown", "config", "chat_export", "snippet"], case_sensitive=False),
+            type=str,  # Concept-driven: validated at Stage B,
         )
 
-    canonical = Librarian(cfg).tag(partial=partial, concept_name=concept_name, type=artifact_type)
+    try:
+        canonical = Librarian(cfg).tag(partial=partial, concept_name=concept_name, artifact_type=artifact_type)
+    except ConceptValidationError as e:
+        click.echo(f"  ❌ B concept validation failed")
+        click.echo(f"\n{e}")
+        # PRIORITY 2: Cleanup partial on failure
+        partial_temp = layout["partials"] / f"{partial.id}.json"
+        if partial_temp.exists():
+            partial_temp.unlink()
+            click.echo(f"  🧹 Rolled back: {partial_temp.name}")
+        sys.exit(1)
+    
     canonical_path = layout["canonical"] / f"{canonical.id}.json"
     _save_model_json(canonical_path, canonical)
 
-    click.echo(f"  ✅ B c={canonical.concept} t={canonical.type}")
+    click.echo(f"  ✅ B c={canonical.concept} t={canonical.artifact_type}")
 
     report = Validator(cfg).validate(canonical)
     report_path = layout["reports"] / f"{report.artifact_id}.json"
@@ -314,7 +326,7 @@ def pipeline(
         {
             "artifact_id": canonical.id,
             "concept": canonical.concept,
-            "type": canonical.type,
+            "type": canonical.artifact_type,
             "result": report.result,
         },
     )
@@ -326,25 +338,37 @@ def pipeline(
 @cli.command()
 @click.option("--concept", "concept_opt", type=str, required=False, default=None)
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+@click.option("--all", "search_all", is_flag=True, help="Search across all concepts")
 @click.argument("concept", type=str, required=False)
-def search(concept_opt: Optional[str], as_json: bool, concept: Optional[str]) -> None:
+def search(concept_opt: Optional[str], as_json: bool, search_all: bool, concept: Optional[str]) -> None:
     """Query SQLite for artifacts matching a concept."""
 
     chosen = concept_opt or concept
-    if not chosen:
-        raise click.ClickException("Provide a concept via --concept or as a positional argument")
-
+    
     cfg = Config()
     audit = AuditLogger(cfg)
-
     registry = Registry(cfg)
-    results = registry.search(chosen)
+    
+    if search_all:
+        results = registry.search_all()
+        search_target = "all"
+    elif chosen:
+        results = registry.search(chosen)
+        search_target = chosen
+    else:
+        raise click.ClickException("Provide a concept or use --all")
 
-    audit.log("search", {"concept": chosen, "count": len(results)})
+    audit.log("search", {"concept": search_target, "count": len(results)})
 
     if as_json:
+        payload = []
+        for a in results:
+            d = a.model_dump(mode="json")
+            if "artifact_type" in d and "type" not in d:
+                d["type"] = d["artifact_type"]
+            payload.append(d)
         click.echo(
-            json.dumps([a.model_dump(mode="json") for a in results], ensure_ascii=False)
+            json.dumps(payload, ensure_ascii=False)
         )
         return
 

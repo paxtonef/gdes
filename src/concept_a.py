@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from .models import PartialArtifact
+from .artifact import PartialArtifact
 
 
 class Ingestor:
