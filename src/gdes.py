@@ -119,7 +119,7 @@ def tag(artifact_id: Optional[str]) -> None:
     concept_name = click.prompt("Concept", type=str)
     artifact_type = click.prompt(
         "Type",
-        type=click.Choice(["code", "markdown", "config", "chat_export", "snippet"], case_sensitive=False),
+        type=str,  # Concept-driven: validated at Stage B,
     )
 
     librarian = Librarian(cfg)
@@ -227,7 +227,7 @@ def store(artifact_id: Optional[str]) -> None:
     "-t",
     "--type",
     "artifact_type",
-    type=click.Choice(["code", "markdown", "config", "chat_export", "snippet"], case_sensitive=False),
+    type=str,  # Concept-driven: validated at Stage B,
     required=False,
     default=None,
 )
@@ -269,7 +269,7 @@ def pipeline(
     if artifact_type is None:
         artifact_type = click.prompt(
             "Type",
-            type=click.Choice(["code", "markdown", "config", "chat_export", "snippet"], case_sensitive=False),
+            type=str,  # Concept-driven: validated at Stage B,
         )
 
     try:
