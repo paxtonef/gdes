@@ -1,0 +1,31 @@
+concept_id: config
+identity:
+  name: Configuration
+  type: Config
+purpose:
+  solves: "Manage system settings"
+  without_this: "Settings scattered and untracked"
+  success_signal: "Config versioned and validated"
+placement:
+  layer: Infrastructure
+  upstream: ["doc_guide"]
+  downstream: ["my_tool"]
+contract:
+  allowed_types:
+    - json
+    - yaml
+    - toml
+  input:
+    format: "text"
+  output:
+    format: "structured"
+responsibilities:
+  - "Store settings"
+  - "Validate structure"
+  - "Track changes"
+boundaries:
+  explicitly_forbidden:
+    - "executable_code"
+    - "secrets_plaintext"
+  drift_warnings:
+    - "Do not store credentials unencrypted"
