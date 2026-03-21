@@ -11,6 +11,9 @@ placement:
   upstream: ["my_tool"]
   downstream: ["Human"]
 contract:
+  allowed_types:
+    - markdown
+    - text
   input:
     format: "markdown"
   output:
