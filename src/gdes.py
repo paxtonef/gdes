@@ -741,8 +741,6 @@ def path_cmd(src, dst, concept, type_):
         raise SystemExit(1)
 
 
-if __name__ == "__main__":
-    cli()
 
 
 @cli.command(name="detect-cycles")
@@ -821,3 +819,5 @@ def components_cmd(output_json):
         click.echo(json.dumps({"ok": False, "error": str(e)}))
         raise SystemExit(1)
 
+if __name__ == "__main__":
+    cli()
