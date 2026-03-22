@@ -468,5 +468,76 @@ def cli_export_all(output_file):
     os.system(f".venv/bin/python -m src.gdes search --all --json > {output_file}")
     click.echo(f"Exported to {output_file}")
 
+
+
+@cli.command(name="link")
+@click.argument("artifact_id")
+@click.argument("related_id")
+def link_artifacts(artifact_id, related_id):
+    """Add reference from artifact_id to related_id (V1.5)"""
+    from src.concept_d import Registry
+    from src.core import Config
+    from src.artifact import ValidationReport, CanonicalArtifact
+    import json
+    
+    cfg = Config()
+    registry = Registry(cfg)
+    
+    # Find artifacts
+    all_artifacts = registry.search_all()
+    artifact = next((a for a in all_artifacts if a.id == artifact_id), None)
+    if not artifact:
+        raise click.ClickException(f"Artifact {artifact_id} not found")
+    related = next((a for a in all_artifacts if a.id == related_id), None)
+    if not related:
+        raise click.ClickException(f"Related artifact {related_id} not found")
+    
+    # Store reference in metadata (V1.5 minimal approach)
+    updated_meta = dict(artifact.metadata)
+    refs = updated_meta.get("related_to", [])
+    if related_id not in refs:
+        refs.append(related_id)
+    updated_meta["related_to"] = refs
+    
+    # Reconstruct artifact with updated metadata (stored as JSON in DB)
+    # We need to use registry's internal reconstruction or update metadata
+    with registry._connect() as conn:
+        conn.execute(
+            "UPDATE artifacts SET metadata_json = ? WHERE id = ?",
+            (json.dumps(updated_meta), artifact_id)
+        )
+        conn.commit()
+    
+    click.echo(f"Linked {artifact_id} → {related_id}")
+
+@cli.command(name="refs")
+@click.argument("artifact_id")
+def show_references(artifact_id):
+    """Show artifacts related to given ID"""
+    from src.concept_d import Registry
+    from src.core import Config
+    
+    cfg = Config()
+    registry = Registry(cfg)
+    
+    # Find artifact
+    all_artifacts = registry.search_all()
+    artifact = next((a for a in all_artifacts if a.id == artifact_id), None)
+    if not artifact:
+        raise click.ClickException(f"Artifact {artifact_id} not found")
+    
+    # Get refs from metadata
+    related = artifact.metadata.get("related_to", [])
+    
+    click.echo(f"Artifact: {artifact_id}")
+    click.echo(f"Concept: {artifact.concept}")
+    click.echo(f"Type: {artifact.artifact_type}")
+    click.echo(f"Related to: {related}")
+    
+    # Bidirectional: who references this
+    referenced_by = [a.id for a in all_artifacts if artifact_id in a.metadata.get("related_to", [])]
+    click.echo(f"Referenced by: {referenced_by}")
+
+
 if __name__ == "__main__":
     cli()
