@@ -664,7 +664,7 @@ def validate_links_cmd():
 
 
 # V1.7: Graph Navigation Commands
-from src.graph import build_adjacency, neighbors, subgraph, shortest_path
+from src.graph import build_adjacency, neighbors, subgraph, shortest_path, detect_cycles, validate_chain, connected_components
 
 def _get_artifacts_for_graph():
     """Get all artifacts as dicts for graph operations"""
@@ -743,3 +743,81 @@ def path_cmd(src, dst, concept, type_):
 
 if __name__ == "__main__":
     cli()
+
+
+@cli.command(name="detect-cycles")
+@click.option("--json", "output_json", is_flag=True, help="Output raw JSON")
+def detect_cycles_cmd(output_json):
+    """Detect cycles in the artifact graph"""
+    try:
+        artifacts = _get_artifacts_for_graph()
+        graph, meta = build_adjacency(artifacts)
+        cycles = detect_cycles(graph)
+        result = {
+            "ok": True,
+            "cycle_count": len(cycles),
+            "cycles": cycles,
+            "is_dag": len(cycles) == 0,
+        }
+        if output_json:
+            click.echo(json.dumps(result, indent=2))
+        else:
+            if result["is_dag"]:
+                click.echo("✅ No cycles detected — graph is a DAG")
+            else:
+                click.echo(f"⚠  {result['cycle_count']} cycle(s) detected:")
+                for i, cycle in enumerate(cycles, 1):
+                    click.echo(f"  {i}. {' → '.join(cycle)}")
+    except Exception as e:
+        click.echo(json.dumps({"ok": False, "error": str(e)}))
+        raise SystemExit(1)
+
+
+@cli.command(name="validate-chain")
+@click.argument("src")
+@click.argument("dst")
+@click.option("--json", "output_json", is_flag=True, help="Output raw JSON")
+def validate_chain_cmd(src, dst, output_json):
+    """Validate that a directed path exists between two artifacts"""
+    try:
+        artifacts = _get_artifacts_for_graph()
+        graph, meta = build_adjacency(artifacts)
+        result = validate_chain(graph, meta, src, dst)
+        result["ok"] = True
+        if output_json:
+            click.echo(json.dumps(result, indent=2))
+        else:
+            if result["valid"]:
+                path_str = " → ".join(result["path"])
+                click.echo(f"✅ Valid chain ({result['hops']} hops): {path_str}")
+                click.echo(f"   Concepts: {' → '.join(str(c) for c in result['concepts_traversed'])}")
+            else:
+                click.echo(f"❌ {result.get('error', 'no path found')}")
+    except Exception as e:
+        click.echo(json.dumps({"ok": False, "error": str(e)}))
+        raise SystemExit(1)
+
+
+@cli.command(name="components")
+@click.option("--json", "output_json", is_flag=True, help="Output raw JSON")
+def components_cmd(output_json):
+    """Show weakly connected components of the artifact graph"""
+    try:
+        artifacts = _get_artifacts_for_graph()
+        graph, meta = build_adjacency(artifacts)
+        comps = connected_components(graph)
+        result = {
+            "ok": True,
+            "component_count": len(comps),
+            "components": [{"size": len(c), "nodes": c} for c in comps],
+        }
+        if output_json:
+            click.echo(json.dumps(result, indent=2))
+        else:
+            click.echo(f"Found {result['component_count']} component(s):")
+            for i, comp in enumerate(result["components"], 1):
+                click.echo(f"  {i}. size={comp['size']}  nodes={comp['nodes'][:5]}{'...' if comp['size'] > 5 else ''}")
+    except Exception as e:
+        click.echo(json.dumps({"ok": False, "error": str(e)}))
+        raise SystemExit(1)
+
