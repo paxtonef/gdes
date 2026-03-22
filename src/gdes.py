@@ -396,5 +396,77 @@ def status() -> None:
     click.echo(f"Staging reports : {len(reports)}")
 
 
+
+
+import json
+import time
+import shutil
+from pathlib import Path
+
+@cli.command()
+@click.argument('export_file', type=click.Path(exists=True))
+def rebuild_registry(export_file):
+    """Rebuild SQLite registry from JSON export (destructive)"""
+    from src.concept_d import Registry
+    from src.core import Config
+    from src.artifact import CanonicalArtifact, ValidationReport
+    
+    cfg = Config()
+    registry = Registry(cfg)
+    
+    db_path = Path.home() / ".gdes" / "registry.db"
+    if db_path.exists():
+        backup_db = str(db_path) + f".archive_{int(time.time())}"
+        shutil.copy(db_path, backup_db)
+        click.echo(f"Archived current registry to {backup_db}")
+    
+    with open(export_file) as f:
+        artifacts = json.load(f)
+    
+    if db_path.exists():
+        db_path.unlink()
+    
+    registry = Registry(cfg)
+    
+    restored = 0
+    for art_dict in artifacts:
+        artifact = CanonicalArtifact(**art_dict)
+        # Create synthetic pass report for restored artifact
+        report = ValidationReport(
+            artifact_id=artifact.id,
+            concept=artifact.concept,
+            result="pass",
+            checks={"restored": True}
+        )
+        registry.store(artifact, report)
+        restored += 1
+    
+    click.echo(f"Restored {restored} artifacts")
+
+import os
+
+@cli.command(name="backup")
+def cli_backup():
+    """Create full system snapshot"""
+    script_path = Path(__file__).parent.parent / "scripts" / "backup.sh"
+    os.system(f"bash {script_path}")
+
+@cli.command(name="restore")
+@click.argument("backup_file")
+@click.option("--force", is_flag=True, help="Skip confirmation")
+def cli_restore(backup_file, force):
+    """Restore from snapshot (destructive)"""
+    if not force:
+        click.confirm(f"Replace current state with {backup_file}?", abort=True)
+    script_path = Path(__file__).parent.parent / "scripts" / "restore.sh"
+    os.system(f"bash {script_path} {backup_file}")
+
+@cli.command(name="export-all")
+@click.argument("output_file")
+def cli_export_all(output_file):
+    """Export entire registry to JSON"""
+    os.system(f".venv/bin/python -m src.gdes search --all --json > {output_file}")
+    click.echo(f"Exported to {output_file}")
+
 if __name__ == "__main__":
     cli()
