@@ -1,0 +1,2 @@
+Unresolved cross-reference sample
+Used to test dangling relationship rejection

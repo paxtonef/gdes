@@ -339,8 +339,9 @@ def pipeline(
 @click.option("--concept", "concept_opt", type=str, required=False, default=None)
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
 @click.option("--all", "search_all", is_flag=True, help="Search across all concepts")
+@click.option("--related-to", "related_to", type=str, required=False, help="Find artifacts referencing this ID")
 @click.argument("concept", type=str, required=False)
-def search(concept_opt: Optional[str], as_json: bool, search_all: bool, concept: Optional[str]) -> None:
+def search(concept_opt: Optional[str], as_json: bool, search_all: bool, concept: Optional[str], related_to: Optional[str] = None) -> None:
     """Query SQLite for artifacts matching a concept."""
 
     chosen = concept_opt or concept
@@ -349,7 +350,11 @@ def search(concept_opt: Optional[str], as_json: bool, search_all: bool, concept:
     audit = AuditLogger(cfg)
     registry = Registry(cfg)
     
-    if search_all:
+    if related_to:
+        all_results = registry.search_all()
+        results = [a for a in all_results if related_to in a.metadata.get("related_to", [])]
+        search_target = f"related-to:{related_to}"
+    elif search_all:
         results = registry.search_all()
         search_target = "all"
     elif chosen:
@@ -474,10 +479,10 @@ def cli_export_all(output_file):
 @click.argument("artifact_id")
 @click.argument("related_id")
 def link_artifacts(artifact_id, related_id):
-    """Add reference from artifact_id to related_id (V1.5)"""
+    """Add reference from artifact_id to related_id (V1.6 with validation)"""
     from src.concept_d import Registry
     from src.core import Config
-    from src.artifact import ValidationReport, CanonicalArtifact
+    from src.linking import validate_references, get_links, add_reference
     import json
     
     cfg = Config()
@@ -492,15 +497,30 @@ def link_artifacts(artifact_id, related_id):
     if not related:
         raise click.ClickException(f"Related artifact {related_id} not found")
     
-    # Store reference in metadata (V1.5 minimal approach)
-    updated_meta = dict(artifact.metadata)
-    refs = updated_meta.get("related_to", [])
-    if related_id not in refs:
-        refs.append(related_id)
-    updated_meta["related_to"] = refs
+    # Convert to dict for linking validation
+    art_dict = _artifact_to_dict(artifact)
     
-    # Reconstruct artifact with updated metadata (stored as JSON in DB)
-    # We need to use registry's internal reconstruction or update metadata
+    # Check existing refs for duplicates
+    existing_ids = {a.id for a in all_artifacts}
+    
+    # Validate before adding (self-link check)
+    if artifact_id == related_id:
+        raise click.ClickException("self-link is not allowed")
+    
+    # Check for duplicate
+    if related_id in get_links(art_dict):
+        raise click.ClickException("duplicate link is not allowed")
+    
+    # Add reference
+    try:
+        updated = add_reference(art_dict, related_id)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+    
+    # Store updated refs
+    updated_meta = dict(artifact.metadata)
+    updated_meta["related_to"] = updated.get("related_to", [])
+    
     with registry._connect() as conn:
         conn.execute(
             "UPDATE artifacts SET metadata_json = ? WHERE id = ?",
@@ -538,6 +558,108 @@ def show_references(artifact_id):
     referenced_by = [a.id for a in all_artifacts if artifact_id in a.metadata.get("related_to", [])]
     click.echo(f"Referenced by: {referenced_by}")
 
+
+
+import json
+from src.linking import validate_references, get_links, add_reference
+
+
+def _artifact_to_dict(artifact):
+    """Convert CanonicalArtifact to dict for linking.py"""
+    return {
+        "id": artifact.id,
+        "concept": artifact.concept,
+        "type": artifact.artifact_type,
+        "content_hash": getattr(artifact, 'content_hash', ''),
+        "created_at": str(artifact.created_at),
+        "metadata": artifact.metadata,
+        "related_to": artifact.metadata.get("related_to", [])
+    }
+    """Convert CanonicalArtifact to dict for linking.py"""
+    return {
+        "id": artifact.id,
+        "concept": artifact.concept,
+        "type": artifact.artifact_type,
+        "content_hash": getattr(artifact, 'content_hash', ''),
+        "created_at": str(artifact.created_at),
+        "metadata": artifact.metadata,
+        "related_to": artifact.metadata.get("related_to", [])
+    }
+
+def _dict_to_artifact_update(artifact_dict, original_artifact):
+    """Update artifact metadata with new refs"""
+    from src.artifact import ValidationReport
+    from src.concept_d import Registry
+    
+    # Update metadata
+    updated_meta = dict(original_artifact.metadata)
+    updated_meta["related_to"] = artifact_dict.get("related_to", [])
+    
+    # Store update via registry
+    cfg = Config()
+    registry = Registry(cfg)
+    
+    with registry._connect() as conn:
+        conn.execute(
+            "UPDATE artifacts SET metadata_json = ? WHERE id = ?",
+            (json.dumps(updated_meta), original_artifact.id)
+        )
+        conn.commit()
+
+@cli.command(name="show-links")
+@click.argument("artifact_id")
+def show_links_cmd(artifact_id: str):
+    """Show links for an artifact"""
+    from src.concept_d import Registry
+    from src.core import Config
+    
+    cfg = Config()
+    registry = Registry(cfg)
+    
+    all_artifacts = registry.search_all()
+    artifact = next((a for a in all_artifacts if a.id == artifact_id), None)
+    
+    if not artifact:
+        click.echo(json.dumps({"ok": False, "error": "artifact not found"}))
+        raise SystemExit(1)
+    
+    art_dict = _artifact_to_dict(artifact)
+    links = get_links(art_dict)
+    
+    click.echo(json.dumps({
+        "ok": True,
+        "artifact_id": artifact_id,
+        "concept": artifact.concept,
+        "related_to": links,
+    }, indent=2))
+
+@cli.command(name="validate-links")
+def validate_links_cmd():
+    """Validate all references in registry"""
+    from src.concept_d import Registry
+    from src.core import Config
+    
+    cfg = Config()
+    registry = Registry(cfg)
+    
+    all_artifacts = registry.search_all()
+    existing_ids = {str(a.id) for a in all_artifacts}
+    errors = []
+
+    for artifact in all_artifacts:
+        art_dict = _artifact_to_dict(artifact)
+        artifact_errors = validate_references(art_dict, existing_ids)
+        if artifact_errors:
+            errors.append({
+                "artifact_id": artifact.id,
+                "errors": artifact_errors,
+            })
+
+    ok = len(errors) == 0
+    click.echo(json.dumps({"ok": ok, "errors": errors}, indent=2))
+    raise SystemExit(0 if ok else 1)
+
+# Extend search command - need to add option to existing search
 
 if __name__ == "__main__":
     cli()
