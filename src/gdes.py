@@ -687,26 +687,35 @@ def _get_artifacts_for_graph():
 
 @cli.command(name="neighbors")
 @click.argument("artifact_id")
-def neighbors_cmd(artifact_id):
-    """Get direct neighbors of an artifact"""
+@click.option("--concept", default=None, help="Filter neighbors by concept")
+@click.option("--type", "type_", default=None, help="Filter neighbors by type")
+def neighbors_cmd(artifact_id, concept, type_):
+    """Get direct neighbors of an artifact, optionally filtered"""
     try:
         artifacts = _get_artifacts_for_graph()
-        graph = build_adjacency(artifacts)
-        result = neighbors(graph, artifact_id)
-        click.echo(json.dumps({"ok": True, "artifact_id": artifact_id, "neighbors": result}, indent=2))
+        graph, meta = build_adjacency(artifacts)
+        result = neighbors(graph, meta, artifact_id, concept=concept, type_=type_)
+        click.echo(json.dumps({
+            "ok": True,
+            "artifact_id": artifact_id,
+            "neighbors": result,
+            "filters": {"concept": concept, "type": type_},
+        }, indent=2))
     except Exception as e:
         click.echo(json.dumps({"ok": False, "error": str(e)}))
         raise SystemExit(1)
 
 @cli.command(name="subgraph")
 @click.argument("artifact_id")
-@click.option("--depth", default=1, help="Traversal depth")
-def subgraph_cmd(artifact_id, depth):
-    """Get subgraph starting from artifact (BFS)"""
+@click.option("--depth", default=1, type=int, help="Traversal depth")
+@click.option("--concept", default=None, help="Filter nodes by concept")
+@click.option("--type", "type_", default=None, help="Filter nodes by type")
+def subgraph_cmd(artifact_id, depth, concept, type_):
+    """Get subgraph starting from artifact (BFS), optionally filtered"""
     try:
         artifacts = _get_artifacts_for_graph()
-        graph = build_adjacency(artifacts)
-        result = subgraph(graph, artifact_id, depth)
+        graph, meta = build_adjacency(artifacts)
+        result = subgraph(graph, meta, artifact_id, depth, concept=concept, type_=type_)
         click.echo(json.dumps({"ok": True, "start": artifact_id, "depth": depth, "nodes": result}, indent=2))
     except Exception as e:
         click.echo(json.dumps({"ok": False, "error": str(e)}))
@@ -715,12 +724,14 @@ def subgraph_cmd(artifact_id, depth):
 @cli.command(name="path")
 @click.argument("src")
 @click.argument("dst")
-def path_cmd(src, dst):
-    """Find shortest path between two artifacts"""
+@click.option("--concept", default=None, help="Only traverse nodes in this concept")
+@click.option("--type", "type_", default=None, help="Only traverse nodes of this type")
+def path_cmd(src, dst, concept, type_):
+    """Find shortest path between two artifacts, optionally filtered"""
     try:
         artifacts = _get_artifacts_for_graph()
-        graph = build_adjacency(artifacts)
-        result = shortest_path(graph, src, dst)
+        graph, meta = build_adjacency(artifacts)
+        result = shortest_path(graph, meta, src, dst, concept=concept, type_=type_)
         if not result:
             click.echo(json.dumps({"ok": False, "error": "no path found"}, indent=2))
             raise SystemExit(1)
