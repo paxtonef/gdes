@@ -661,5 +661,74 @@ def validate_links_cmd():
 
 # Extend search command - need to add option to existing search
 
+
+
+# V1.7: Graph Navigation Commands
+from src.graph import build_adjacency, neighbors, subgraph, shortest_path
+
+def _get_artifacts_for_graph():
+    """Get all artifacts as dicts for graph operations"""
+    from src.concept_d import Registry
+    from src.core import Config
+    
+    cfg = Config()
+    registry = Registry(cfg)
+    
+    all_artifacts = registry.search_all()
+    result = []
+    for a in all_artifacts:
+        result.append({
+            "id": a.id,
+            "concept": a.concept,
+            "type": a.artifact_type,
+            "related_to": a.metadata.get("related_to", [])
+        })
+    return result
+
+@cli.command(name="neighbors")
+@click.argument("artifact_id")
+def neighbors_cmd(artifact_id):
+    """Get direct neighbors of an artifact"""
+    try:
+        artifacts = _get_artifacts_for_graph()
+        graph = build_adjacency(artifacts)
+        result = neighbors(graph, artifact_id)
+        click.echo(json.dumps({"ok": True, "artifact_id": artifact_id, "neighbors": result}, indent=2))
+    except Exception as e:
+        click.echo(json.dumps({"ok": False, "error": str(e)}))
+        raise SystemExit(1)
+
+@cli.command(name="subgraph")
+@click.argument("artifact_id")
+@click.option("--depth", default=1, help="Traversal depth")
+def subgraph_cmd(artifact_id, depth):
+    """Get subgraph starting from artifact (BFS)"""
+    try:
+        artifacts = _get_artifacts_for_graph()
+        graph = build_adjacency(artifacts)
+        result = subgraph(graph, artifact_id, depth)
+        click.echo(json.dumps({"ok": True, "start": artifact_id, "depth": depth, "nodes": result}, indent=2))
+    except Exception as e:
+        click.echo(json.dumps({"ok": False, "error": str(e)}))
+        raise SystemExit(1)
+
+@cli.command(name="path")
+@click.argument("src")
+@click.argument("dst")
+def path_cmd(src, dst):
+    """Find shortest path between two artifacts"""
+    try:
+        artifacts = _get_artifacts_for_graph()
+        graph = build_adjacency(artifacts)
+        result = shortest_path(graph, src, dst)
+        if not result:
+            click.echo(json.dumps({"ok": False, "error": "no path found"}, indent=2))
+            raise SystemExit(1)
+        click.echo(json.dumps({"ok": True, "src": src, "dst": dst, "path": result}, indent=2))
+    except Exception as e:
+        click.echo(json.dumps({"ok": False, "error": str(e)}))
+        raise SystemExit(1)
+
+
 if __name__ == "__main__":
     cli()
