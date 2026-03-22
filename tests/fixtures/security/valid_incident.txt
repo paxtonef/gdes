@@ -1,0 +1,4 @@
+Unauthorized access detected at 03:45
+IP: 192.168.1.100
+Action: Blocked
+Severity: High

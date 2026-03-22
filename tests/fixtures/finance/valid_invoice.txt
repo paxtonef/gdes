@@ -1,0 +1,4 @@
+Invoice #1234
+Amount: 500€
+Date: 2026-03-22
+Vendor: Acme Corp
