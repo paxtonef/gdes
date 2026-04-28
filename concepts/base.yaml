@@ -1,0 +1,25 @@
+concept_id: base
+identity:
+  name: Base Concept
+  type: System
+purpose:
+  solves: "Foundation for all GDES artifacts"
+contract:
+  allowed_types: []
+  input:
+    format: text
+  output:
+    format: structured_data
+responsibilities:
+  - "Declare identity and purpose"
+  - "Define boundaries"
+boundaries:
+  explicitly_forbidden:
+    - "secrets_plaintext"
+    - "executable_code"
+  drift_warnings:
+    - "Do not bypass validation"
+meta:
+  extends: null
+  abstract: true
+  version: 1.11.0

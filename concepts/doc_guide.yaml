@@ -31,6 +31,6 @@ boundaries:
   - Do not add CLI commands
   - Do not include implementation code
 meta:
-  extends: null
+  extends: base
   abstract: false
-  version: 1.8.0
+  version: 1.11.0

@@ -30,6 +30,6 @@ boundaries:
   drift_warnings:
   - Do not add web server
 meta:
-  extends: null
+  extends: base
   abstract: false
-  version: 1.8.0
+  version: 1.11.0
