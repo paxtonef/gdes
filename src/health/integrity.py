@@ -1,91 +1,100 @@
-from __future__ import annotations
+"""Operational health checks"""
 import sqlite3
 import json
+from dataclasses import dataclass, asdict
 from pathlib import Path
-from dataclasses import dataclass, field
-from typing import List
+from typing import List, Dict
 
 @dataclass
 class HealthReport:
-    total_nodes: int = 0
-    total_edges: int = 0
-    orphan_nodes: List[str] = field(default_factory=list)
-    dangling_refs: List[str] = field(default_factory=list)
-    integrity_score: float = 1.0
-    warnings: List[str] = field(default_factory=list)
+    total_nodes: int
+    orphaned_nodes: int
+    orphaned_percentage: float
+    broken_refs: List[Dict]
+    cycles_detected: List[List[str]]
+    concept_distribution: Dict[str, int]
+    integrity_score: float
+    status: str
 
 class IntegrityChecker:
     def __init__(self, db_path: Path):
-        self.conn = sqlite3.connect(str(db_path))
-        self.conn.row_factory = sqlite3.Row
-
-    def load_graph(self):
-        import networkx as nx
-        G = nx.Graph()
-        cursor = self.conn.cursor()
-
-        # Nodes from artifacts table
-        cursor.execute("SELECT id, concept, type FROM artifacts")
-        for row in cursor.fetchall():
-            G.add_node(row["id"], concept=row["concept"], type=row["type"])
-
-        # Edges from metadata_json related_to
-        cursor.execute("SELECT id, metadata_json FROM artifacts")
-        for row in cursor.fetchall():
-            meta = json.loads(row["metadata_json"] or "{}")
-            for target_id in meta.get("related_to", []):
-                if G.has_node(row["id"]) and G.has_node(target_id):
-                    G.add_edge(row["id"], target_id, relation="related_to")
-
-        return G
-
-    def check(self) -> HealthReport:
-        G = self.load_graph()
-        nodes = list(G.nodes())
+        self.db_path = db_path
+        
+    def check(self):
+        # Handle missing or empty DB
+        if not self.db_path.exists() or self.db_path.stat().st_size == 0:
+            return HealthReport(
+                total_nodes=0, orphaned_nodes=0, orphaned_percentage=0.0,
+                broken_refs=[], cycles_detected=[], concept_distribution={},
+                integrity_score=1.0, status="DATABASE_EMPTY"
+            )
+        
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT id, concept, type FROM registry")
+            nodes = {r['id']: dict(r) for r in cursor.fetchall()}
+            
+            cursor.execute("SELECT source_id, target_id, relation FROM relationships")
+            edges = [dict(r) for r in cursor.fetchall()]
+        except sqlite3.OperationalError as e:
+            return HealthReport(
+                total_nodes=0, orphaned_nodes=0, orphaned_percentage=0.0,
+                broken_refs=[], cycles_detected=[], concept_distribution={},
+                integrity_score=0.0, status=f"DB_ERROR: {e}"
+            )
+        
         total = len(nodes)
-
-        orphans = [n for n in nodes if G.degree(n) == 0]
-
-        dangling = []
-        cursor = self.conn.cursor()
-        cursor.execute("SELECT id FROM artifacts")
-        all_ids = {row["id"] for row in cursor.fetchall()}
-        cursor.execute("SELECT id, metadata_json FROM artifacts")
-        for row in cursor.fetchall():
-            meta = json.loads(row["metadata_json"] or "{}")
-            for target_id in meta.get("related_to", []):
-                if target_id not in all_ids:
-                    dangling.append(f"{row['id']} -> {target_id}")
-
+        node_ids = set(nodes.keys())
+        connected = set()
+        broken = []
+        
+        for e in edges:
+            connected.add(e['source_id'])
+            connected.add(e['target_id'])
+            if e['target_id'] not in node_ids:
+                broken.append({"source": e['source_id'], "missing_target": e['target_id']})
+        
+        orphaned = [n for n in nodes if n not in connected]
+        orphan_pct = (len(orphaned)/total*100) if total else 0
+        
+        distribution = {}
+        for n, data in nodes.items():
+            c = data.get('concept', 'unknown')
+            distribution[c] = distribution.get(c, 0) + 1
+        
         score = 1.0
-        if total > 0:
-            score -= len(dangling) * 0.2
-            score -= len(orphans) / total * 0.1
-        score = max(0.0, round(score, 3))
-
+        if orphan_pct > 5: score -= 0.3
+        if broken: score -= 0.4
+        
         return HealthReport(
             total_nodes=total,
-            total_edges=G.number_of_edges(),
-            orphan_nodes=orphans,
-            dangling_refs=dangling,
-            integrity_score=score,
-            warnings=[f"Dangling ref: {d}" for d in dangling],
+            orphaned_nodes=len(orphaned),
+            orphaned_percentage=orphan_pct,
+            broken_refs=broken,
+            cycles_detected=[],
+            concept_distribution=distribution,
+            integrity_score=max(0.0, score),
+            status="OK"
         )
-
-    def format_report(self, report: HealthReport) -> str:
+    
+    def format_report(self, r):
         lines = [
-            "GDES Health Report",
-            "──────────────────",
-            f"Nodes:           {report.total_nodes}",
-            f"Edges:           {report.total_edges}",
-            f"Orphans:         {len(report.orphan_nodes)}",
-            f"Dangling refs:   {len(report.dangling_refs)}",
-            f"Integrity score: {report.integrity_score:.3f}",
+            "=== GDES Health Report ===",
+            f"Status: {r.status}",
+            f"Total Nodes: {r.total_nodes}",
+            f"Orphaned: {r.orphaned_nodes} ({r.orphaned_percentage:.1f}%)",
+            f"Integrity Score: {r.integrity_score:.2f}",
+            "", "Concept Distribution:"
         ]
-        if report.warnings:
-            lines.append("\nWarnings:")
-            for w in report.warnings:
-                lines.append(f"  ⚠ {w}")
-        else:
-            lines.append("\n✅ No integrity issues found.")
+        for c, n in sorted(r.concept_distribution.items()):
+            lines.append(f"  {c}: {n}")
+        if r.status == "DATABASE_EMPTY":
+            lines.append("\nℹ️  Database is empty. Run 'gdes pipeline' to populate.")
+        elif r.orphaned_percentage > 5:
+            lines.append("\n⚠️  Orphaned nodes > 5%")
+        if r.broken_refs:
+            lines.append(f"\n❌ {len(r.broken_refs)} broken refs")
         return "\n".join(lines)
