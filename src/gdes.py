@@ -941,5 +941,22 @@ def migrate_cmd(apply: bool, as_json: bool) -> None:
             if len(report.drift) > 5:
                 click.echo(f"    ... and {len(report.drift) - 5} more")
 
+@cli.command(name="export-graph")
+@click.option("--format", "fmt", default="mermaid", type=click.Choice(["mermaid", "dot"]), help="Output format")
+@click.option("--output", "out_path", type=click.Path(path_type=Path), help="Write to file instead of stdout")
+def export_graph(fmt: str, out_path: Optional[Path]) -> None:
+    """Export artifact relation graph to Mermaid or DOT."""
+    from src.exporters.graph_export import GraphExporter
+    from src.core import Config
+
+    cfg = Config()
+    exporter = GraphExporter(cfg)
+    content = exporter.export(format=fmt, output=out_path)
+
+    if out_path:
+        click.echo(f'Graph exported to {out_path} ({fmt})')
+    else:
+        click.echo(content)
+
 if __name__ == "__main__":
     cli()
