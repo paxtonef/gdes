@@ -160,71 +160,138 @@ def run_pipeline(req: PipelineRequest):
     """Ingest content through the full A→B→C→D pipeline."""
     cfg = _cfg()
 
-    # Write content to a temp file (pipeline expects a file path)
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-        f.write(req.content)
-        tmp_path = Path(f.name)
-
     try:
-        # Stage A — ingest
-        ingestor = Ingestor(cfg)
-        partial = ingestor.ingest_file(tmp_path, source=req.source)
+        with staging_lock(cfg.paths.inbox, timeout=5):
+            # Stage A — ingest
+            partial = Ingestor().ingest(content=req.content, source=req.source)
 
-        # Stage B — tag/validate concept
-        librarian = Librarian(cfg)
-        canonical = librarian.tag(partial, concept=req.concept, type_=req.type)
+            # Stage B — tag/validate concept
+            librarian = Librarian(cfg)
+            canonical = librarian.tag(partial, concept_name=req.concept, artifact_type=req.type)
 
-        # Stage C — validate
-        validator = Validator(cfg)
-        report = validator.validate(canonical)
-        if report.result != "pass":
-            return JSONResponse(
-                status_code=422,
-                content={"ok": False, "stage": "C", "violations": report.violations},
-            )
+            # Stage C — validate
+            validator = Validator(cfg)
+            report = validator.validate(canonical)
+            if report.result != "pass":
+                return JSONResponse(
+                    status_code=422,
+                    content={"ok": False, "stage": "C", "violations": report.violations},
+                )
 
-        # Stage D — store
-        registry = Registry(cfg)
-        registry.store(canonical)
+            # Stage D — store
+            registry = Registry(cfg)
+            registry.store(canonical, report)
 
-        return {
-            "ok": True,
-            "id": canonical.id,
-            "concept": req.concept,
-            "type": req.type,
-        }
+            return {
+                "ok": True,
+                "id": canonical.id,
+                "concept": req.concept,
+                "type": req.type,
+            }
     except ConceptValidationError as e:
         return JSONResponse(status_code=422, content={"ok": False, "error": str(e)})
+    except StagingConcurrencyError as e:
+        return JSONResponse(status_code=423, content={"ok": False, "error": str(e)})
     except Exception as e:
         return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
-    finally:
-        tmp_path.unlink(missing_ok=True)
 
 
 # ── links ─────────────────────────────────────────────────────────────────────
 
 @app.post("/link", tags=["links"])
 def link_artifacts(req: LinkRequest):
-    """Add a directed reference from artifact_id to related_id."""
-    from .linking import add_reference, validate_references
-    db = _db_path()
+    """Add a typed directed reference from artifact_id to related_id."""
+    from .linking import add_reference, get_links
+    from .validators.relationship_schema import RelationshipValidator
+    import json
+
+    cfg = _cfg()
+    registry = Registry(cfg)
+    all_artifacts = registry.search_all()
+
+    artifact = next((a for a in all_artifacts if a.id == req.artifact_id), None)
+    if not artifact:
+        raise HTTPException(status_code=404, detail=f"Artifact {req.artifact_id!r} not found")
+    related = next((a for a in all_artifacts if a.id == req.related_id), None)
+    if not related:
+        raise HTTPException(status_code=404, detail=f"Related artifact {req.related_id!r} not found")
+
+    # Typed relationship validation (auto-select if no --relation provided)
+    rel_validator = RelationshipValidator(strict=True)
+    source_concept = artifact.concept
+    target_concept = related.concept
+
+    valid_targets = rel_validator.get_valid_targets(source_concept)
+    if target_concept in valid_targets:
+        relation = valid_targets[target_concept][0]
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No schema defined for {source_concept} → {target_concept}"
+        )
+
     try:
-        add_reference(db, req.artifact_id, req.related_id)
-        return {"ok": True, "artifact_id": req.artifact_id, "related_id": req.related_id}
-    except Exception as e:
+        rel_validator.validate(source_concept, target_concept, relation)
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    # Self-link and duplicate guards
+    if req.artifact_id == req.related_id:
+        raise HTTPException(status_code=400, detail="self-link is not allowed")
+
+    art_dict = {
+        "id": artifact.id,
+        "concept": artifact.concept,
+        "type": artifact.artifact_type,
+        "content_hash": getattr(artifact, "content_hash", ""),
+        "created_at": str(artifact.created_at),
+        "metadata": artifact.metadata,
+        "related_to": artifact.metadata.get("related_to", []),
+    }
+    if req.related_id in get_links(art_dict):
+        raise HTTPException(status_code=400, detail="duplicate link is not allowed")
+
+    updated = add_reference(art_dict, req.related_id)
+
+    updated_meta = dict(artifact.metadata)
+    updated_meta["related_to"] = updated.get("related_to", [])
+    updated_meta.setdefault("relation_types", {})
+    updated_meta["relation_types"][req.related_id] = relation
+
+    with registry._connect() as conn:
+        conn.execute(
+            "UPDATE artifacts SET metadata_json = ? WHERE id = ?",
+            (json.dumps(updated_meta), req.artifact_id)
+        )
+        conn.commit()
+
+    return {"ok": True, "artifact_id": req.artifact_id, "related_id": req.related_id, "relation": relation}
 
 
 @app.get("/refs/{artifact_id}", tags=["links"])
 def get_refs(artifact_id: str):
     """Get all artifacts that reference the given artifact."""
-    from .linking import get_links
-    db = _db_path()
-    try:
-        links = get_links(db, artifact_id)
-        return {"ok": True, "artifact_id": artifact_id, "refs": links}
-    except Exception as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    cfg = _cfg()
+    registry = Registry(cfg)
+    all_artifacts = registry.search_all()
+
+    artifact = next((a for a in all_artifacts if a.id == artifact_id), None)
+    if not artifact:
+        raise HTTPException(status_code=404, detail=f"Artifact {artifact_id!r} not found")
+
+    # Bidirectional: who references this artifact
+    referenced_by = [
+        {"id": a.id, "concept": a.concept, "relation": a.metadata.get("relation_types", {}).get(artifact_id)}
+        for a in all_artifacts
+        if artifact_id in a.metadata.get("related_to", [])
+    ]
+
+    return {
+        "ok": True,
+        "artifact_id": artifact_id,
+        "referenced_by": referenced_by,
+        "count": len(referenced_by),
+    }
 
 
 # ── graph traversal ───────────────────────────────────────────────────────────

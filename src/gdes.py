@@ -342,8 +342,9 @@ def pipeline(
 @click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
 @click.option("--all", "search_all", is_flag=True, help="Search across all concepts")
 @click.option("--related-to", "related_to", type=str, required=False, help="Find artifacts referencing this ID")
+@click.option("--relation", "relation_filter", type=str, required=False, help="Filter by relation type (e.g. audit, compliance)")
 @click.argument("concept", type=str, required=False)
-def search(concept_opt: Optional[str], as_json: bool, search_all: bool, concept: Optional[str], related_to: Optional[str] = None) -> None:
+def search(concept_opt: Optional[str], as_json: bool, search_all: bool, concept: Optional[str], related_to: Optional[str] = None, relation_filter: Optional[str] = None) -> None:
     """Query SQLite for artifacts matching a concept."""
 
     chosen = concept_opt or concept
@@ -837,6 +838,35 @@ def components_cmd(output_json):
     except Exception as e:
         click.echo(json.dumps({"ok": False, "error": str(e)}))
         raise SystemExit(1)
+
+@cli.command(name="relations")
+@click.argument("artifact_id")
+def show_relations(artifact_id: str) -> None:
+    """Show typed relations for an artifact."""
+    from src.queries.relation_query import RelationQuery
+    from src.core import Config
+
+    cfg = Config()
+    query = RelationQuery(cfg)
+    rels = query.get_relations(artifact_id)
+    incoming = query.get_incoming(artifact_id)
+
+    if not rels and not incoming:
+        click.echo(json.dumps({
+            "ok": True,
+            "artifact_id": artifact_id,
+            "message": "No typed relations found",
+            "outgoing": {},
+            "incoming": [],
+        }, indent=2))
+        return
+
+    click.echo(json.dumps({
+        "ok": True,
+        "artifact_id": artifact_id,
+        "outgoing": rels,
+        "incoming": [{"from": src, "relation": rel} for src, rel in incoming],
+    }, indent=2))
 
 if __name__ == "__main__":
     cli()
