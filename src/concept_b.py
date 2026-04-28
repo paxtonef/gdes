@@ -1,68 +1,44 @@
-"""Concept B: Librarian - Multi-concept governance with graceful validation"""
-import yaml
+"""Concept B: Librarian — Multi-concept governance with unified inheritance resolver"""
+from __future__ import annotations
+
 from pathlib import Path
 from typing import List
 
 from .artifact import CanonicalArtifact, PartialArtifact
+from .resolvers.concept_inheritance import (
+    ConceptResolver,
+    resolve_concept_paths,
+    InheritanceError,
+    AbstractConceptError,
+)
+
 
 class ConceptValidationError(Exception):
     """Controlled failure for concept validation - no traceback"""
     pass
 
+
 class Librarian:
     def __init__(self, config):
         self._config = config
-
-    def _resolve_concept_paths(self) -> List[Path]:
-        """Deterministic path resolution"""
-        paths = []
-
-        # 1. project-local
-        paths.append(Path.cwd() / "concepts")
-
-        # 2. config (optional)
-        if hasattr(self._config, "paths") and hasattr(self._config.paths, "concepts"):
-            paths.append(Path(self._config.paths.concepts).expanduser())
-
-        # 3. fallback
-        paths.append(Path.home() / ".gdes" / "concepts")
-
-        return paths
+        self._resolver = ConceptResolver(resolve_concept_paths(config), strict=True)
 
     def tag(self, partial, concept_name: str, artifact_type: str):
-        """Tag partial artifact into canonical form"""
-        concept_paths = self._resolve_concept_paths()
-        concept_file = None
-        checked_paths = []
+        try:
+            concept_data = self._resolver.get_schema(concept_name)
+        except (InheritanceError, AbstractConceptError) as e:
+            raise ConceptValidationError(str(e))
 
-        for path in concept_paths:
-            candidate = path / f"{concept_name}.yaml"
-            checked_paths.append(str(candidate))
-            if candidate.exists():
-                concept_file = candidate
-                break
-
-        if not concept_file:
-            error_msg = f"Concept '{concept_name}' not found.\nPaths checked:\n"
-            for p in checked_paths:
-                error_msg += f"  - {p}\n"
-            raise ConceptValidationError(error_msg)
-
-        with open(concept_file, "r", encoding="utf-8") as f:
-            concept = yaml.safe_load(f) or {}
-
-        if "boundaries" not in concept:
+        if "boundaries" not in concept_data:
             raise ConceptValidationError(
                 f"Concept '{concept_name}' missing required 'boundaries:' section"
             )
 
-        allowed_types = concept.get("allowed_types")
-        contract = concept.get("contract") or {}
-        if allowed_types is None and isinstance(contract, dict):
-            allowed_types = contract.get("allowed_types")
+        allowed_types = concept_data.get("contract", {}).get("allowed_types", [])
         if isinstance(allowed_types, list) and allowed_types and artifact_type not in allowed_types:
             raise ConceptValidationError(
-                f"Type '{artifact_type}' not allowed for concept '{concept_name}'. Allowed: {allowed_types}"
+                f"Type '{artifact_type}' not allowed for concept '{concept_name}'. "
+                f"Allowed: {allowed_types}"
             )
 
         if isinstance(partial, PartialArtifact):
