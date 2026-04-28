@@ -343,8 +343,10 @@ def pipeline(
 @click.option("--all", "search_all", is_flag=True, help="Search across all concepts")
 @click.option("--related-to", "related_to", type=str, required=False, help="Find artifacts referencing this ID")
 @click.option("--relation", "relation_filter", type=str, required=False, help="Filter by relation type (e.g. audit, compliance)")
+@click.option("--source-concept", "source_concept", type=str, required=False, help="Filter relations where source artifact has this concept")
+@click.option("--target-concept", "target_concept", type=str, required=False, help="Filter relations where target artifact has this concept")
 @click.argument("concept", type=str, required=False)
-def search(concept_opt: Optional[str], as_json: bool, search_all: bool, concept: Optional[str], related_to: Optional[str] = None, relation_filter: Optional[str] = None) -> None:
+def search(concept_opt: Optional[str], as_json: bool, search_all: bool, concept: Optional[str], related_to: Optional[str] = None, relation_filter: Optional[str] = None, source_concept: Optional[str] = None, target_concept: Optional[str] = None) -> None:
     """Query SQLite for artifacts matching a concept."""
 
     chosen = concept_opt or concept
@@ -867,6 +869,48 @@ def show_relations(artifact_id: str) -> None:
         "outgoing": rels,
         "incoming": [{"from": src, "relation": rel} for src, rel in incoming],
     }, indent=2))
+
+@cli.command(name="batch")
+@click.option("--dir", "dir_", type=click.Path(exists=True, file_okay=False, path_type=Path), required=True)
+@click.option("--pattern", default="*", help="Glob pattern for files")
+@click.option("--concept", "concept_name", type=str, required=True)
+@click.option("--type", "artifact_type", type=str, required=True)
+@click.option("--dry-run", is_flag=True, help="Run A->B->C only, skip D store")
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+def batch_cmd(dir_: Path, pattern: str, concept_name: str, artifact_type: str, dry_run: bool, as_json: bool) -> None:
+    """Batch ingest all files in a directory through A->B->C->D."""
+    from src.batch import BatchPipeline
+    from src.core import Config
+
+    cfg = Config()
+    audit = AuditLogger(cfg)
+
+    files = sorted(dir_.glob(pattern))
+    if not files:
+        raise click.ClickException(f"No files matching '{pattern}' in {dir_}")
+
+    pipeline = BatchPipeline(cfg, concept_name, artifact_type, dry_run=dry_run)
+    result = pipeline.run(files)
+
+    audit.log("batch", {
+        "dir": str(dir_),
+        "pattern": pattern,
+        "concept": concept_name,
+        "type": artifact_type,
+        "dry_run": dry_run,
+        **result.to_dict(),
+    })
+
+    if as_json:
+        click.echo(json.dumps(result.to_dict(), indent=2))
+    else:
+        click.echo(f"Batch complete: {result.success_count} success, {result.fail_count} fail, {result.error_count} errors")
+        for s in result.success:
+            click.echo(f"  OK {s['file']} -> {s['id'][:8]}...")
+        for f in result.failed:
+            click.echo(f"  FAIL {f['file']} stage={f.get('stage','?')}")
+        for e in result.errors:
+            click.echo(f"  ERR {e['file']} error={e['error']}")
 
 if __name__ == "__main__":
     cli()
