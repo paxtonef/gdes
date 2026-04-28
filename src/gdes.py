@@ -958,5 +958,45 @@ def export_graph(fmt: str, out_path: Optional[Path]) -> None:
     else:
         click.echo(content)
 
+@cli.command(name="diff")
+@click.argument("artifact_id_a")
+@click.argument("artifact_id_b")
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+def diff_artifacts(artifact_id_a: str, artifact_id_b: str, as_json: bool) -> None:
+    """Compare two artifacts by content, metadata, and relations."""
+    from src.diff import ArtifactDiff
+    from src.core import Config
+
+    cfg = Config()
+    differ = ArtifactDiff(cfg)
+
+    try:
+        result = differ.diff(artifact_id_a, artifact_id_b)
+    except ValueError as e:
+        raise click.ClickException(str(e))
+
+    if as_json:
+        click.echo(json.dumps(result.to_dict(), indent=2))
+    else:
+        if result.identical:
+            click.echo(f"Artifacts {artifact_id_a[:8]}... and {artifact_id_b[:8]}... are identical")
+            return
+
+        click.echo(f"Diff: {artifact_id_a[:8]}... vs {artifact_id_b[:8]}...")
+        if result.content_diff:
+            click.echo(f"  Content: {len(result.content_diff)} lines changed")
+        if result.metadata_added:
+            click.echo(f"  Metadata added: {list(result.metadata_added.keys())}")
+        if result.metadata_removed:
+            click.echo(f"  Metadata removed: {list(result.metadata_removed.keys())}")
+        if result.metadata_changed:
+            click.echo(f"  Metadata changed: {list(result.metadata_changed.keys())}")
+        if result.relations_added:
+            click.echo(f"  Relations added: {list(result.relations_added.keys())}")
+        if result.relations_removed:
+            click.echo(f"  Relations removed: {list(result.relations_removed.keys())}")
+        if result.relations_changed:
+            click.echo(f"  Relations changed: {list(result.relations_changed.keys())}")
+
 if __name__ == "__main__":
     cli()
