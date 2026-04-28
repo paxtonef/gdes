@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from .core import Config
@@ -89,7 +89,7 @@ class Registry:
                     json.dumps(report.checks, ensure_ascii=False),
                     report.result,
                     json.dumps(report.violations, ensure_ascii=False),
-                    datetime.utcnow().isoformat(),
+                    datetime.now(timezone.utc).isoformat(),
                 ),
             )
             conn.commit()

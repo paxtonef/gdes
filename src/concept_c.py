@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .core import Config
 from .artifact import CanonicalArtifact, ValidationReport
@@ -23,13 +23,13 @@ class Validator:
 
     def validate(self, canonical: CanonicalArtifact) -> ValidationReport:
         violations: List[str] = []
-        start_time = datetime.utcnow()
+        start_time = datetime.now(timezone.utc)
 
         try:
             concept_data = self._resolver.get_schema(canonical.concept)
         except InheritanceError as e:
             violations.append(f"Cannot load concept: {e}")
-            duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+            duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
             return ValidationReport(
                 artifact_id=canonical.id,
                 concept=canonical.concept,
@@ -56,7 +56,7 @@ class Validator:
             checks["boundaries"] = True
 
         result = "pass" if not violations and all(checks.values()) else "fail"
-        duration_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+        duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
 
         return ValidationReport(
             artifact_id=canonical.id,

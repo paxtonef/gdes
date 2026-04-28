@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from .core import Config
@@ -71,7 +71,7 @@ class SchemaMigration:
                 with self.registry._connect() as conn:
                     conn.execute(
                         "INSERT OR REPLACE INTO reports(artifact_id, concept, checks_json, result, violations_json, created_at) VALUES(?, ?, ?, ?, ?, ?)",
-                        (new_report.artifact_id, new_report.concept, json.dumps(new_report.checks), new_report.result, json.dumps(new_report.violations), datetime.utcnow().isoformat()),
+                        (new_report.artifact_id, new_report.concept, json.dumps(new_report.checks), new_report.result, json.dumps(new_report.violations), datetime.now(timezone.utc).isoformat()),
                     )
                     conn.commit()
         return report
