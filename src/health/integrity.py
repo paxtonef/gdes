@@ -21,7 +21,6 @@ class IntegrityChecker:
         self.db_path = db_path
         
     def check(self):
-        # Handle missing or empty DB
         if not self.db_path.exists() or self.db_path.stat().st_size == 0:
             return HealthReport(
                 total_nodes=0, orphaned_nodes=0, orphaned_percentage=0.0,
@@ -34,11 +33,8 @@ class IntegrityChecker:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             
-            cursor.execute("SELECT id, concept, type FROM registry")
-            nodes = {r['id']: dict(r) for r in cursor.fetchall()}
-            
-            cursor.execute("SELECT source_id, target_id, relation FROM relationships")
-            edges = [dict(r) for r in cursor.fetchall()]
+            cursor.execute("SELECT id, concept, type, metadata_json FROM artifacts")
+            rows = cursor.fetchall()
         except sqlite3.OperationalError as e:
             return HealthReport(
                 total_nodes=0, orphaned_nodes=0, orphaned_percentage=0.0,
@@ -46,23 +42,41 @@ class IntegrityChecker:
                 integrity_score=0.0, status=f"DB_ERROR: {e}"
             )
         
+        nodes = {}
+        edges = []
+        
+        for r in rows:
+            node_id = r["id"]
+            nodes[node_id] = {
+                "concept": r["concept"],
+                "type": r["type"]
+            }
+            # Extract relationships from metadata_json
+            try:
+                meta = json.loads(r["metadata_json"]) if r["metadata_json"] else {}
+                related = meta.get("related_to", [])
+                for target in related:
+                    edges.append({"source": node_id, "target": target, "relation": "related_to"})
+            except json.JSONDecodeError:
+                pass
+        
         total = len(nodes)
         node_ids = set(nodes.keys())
         connected = set()
         broken = []
         
         for e in edges:
-            connected.add(e['source_id'])
-            connected.add(e['target_id'])
-            if e['target_id'] not in node_ids:
-                broken.append({"source": e['source_id'], "missing_target": e['target_id']})
+            connected.add(e["source"])
+            connected.add(e["target"])
+            if e["target"] not in node_ids:
+                broken.append({"source": e["source"], "missing_target": e["target"]})
         
         orphaned = [n for n in nodes if n not in connected]
         orphan_pct = (len(orphaned)/total*100) if total else 0
         
         distribution = {}
         for n, data in nodes.items():
-            c = data.get('concept', 'unknown')
+            c = data.get("concept", "unknown")
             distribution[c] = distribution.get(c, 0) + 1
         
         score = 1.0
