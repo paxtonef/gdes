@@ -912,5 +912,34 @@ def batch_cmd(dir_: Path, pattern: str, concept_name: str, artifact_type: str, d
         for e in result.errors:
             click.echo(f"  ERR {e['file']} error={e['error']}")
 
+@cli.command(name="migrate")
+@click.option("--apply", is_flag=True, help="Update registry reports with new validation results")
+@click.option("--json", "as_json", is_flag=True, help="Output raw JSON")
+def migrate_cmd(apply: bool, as_json: bool) -> None:
+    """Re-validate all registry artifacts against current concept schemas."""
+    from src.migration import SchemaMigration
+    from src.core import Config
+
+    cfg = Config()
+    audit = AuditLogger(cfg)
+    migrator = SchemaMigration(cfg)
+    report = migrator.run(apply=apply)
+
+    audit.log("migrate", {"apply": apply, **report.to_dict()})
+
+    if as_json:
+        click.echo(json.dumps(report.to_dict(), indent=2))
+    else:
+        click.echo(f"Migration complete: {report.total} artifacts checked")
+        click.echo(f"  OK Passed: {report.passed}")
+        click.echo(f"  FAIL Failed: {report.failed}")
+        click.echo(f"  SKIP Skipped: {report.skipped}")
+        if report.drift:
+            click.echo(f"  WARN Drift: {len(report.drift)} artifacts")
+            for d in report.drift[:5]:
+                click.echo(f"    {d['id'][:8]}... ({d['concept']}) -- {d['status']}")
+            if len(report.drift) > 5:
+                click.echo(f"    ... and {len(report.drift) - 5} more")
+
 if __name__ == "__main__":
     cli()
