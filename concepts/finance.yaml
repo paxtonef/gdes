@@ -1,29 +1,33 @@
 concept_id: finance
 identity:
-  name: "Finance"
+  name: Finance
   type: Business
 purpose:
-  solves: "Track financial documents and transactions"
-  without_this: "Scattered invoices, lost receipts"
-  success_signal: "Organized financial records"
+  solves: Track financial documents and transactions
+  without_this: Scattered invoices, lost receipts
+  success_signal: Organized financial records
 placement:
   layer: Domain
   upstream: []
   downstream: []
 contract:
   allowed_types:
-    - invoice
-    - receipt
-    - budget
+  - invoice
+  - receipt
+  - budget
   input:
-    format: "text"
+    format: text
   output:
-    format: "structured_data"
+    format: structured_data
 responsibilities:
-  - "Process financial documents"
-  - "Validate amounts and dates"
+- Process financial documents
+- Validate amounts and dates
 boundaries:
   explicitly_forbidden:
-    - "personal_finance_tracking"
+  - personal_finance_tracking
   drift_warnings:
-    - "Do not add crypto trading"
+  - Do not add crypto trading
+meta:
+  extends: null
+  abstract: false
+  version: 1.8.0

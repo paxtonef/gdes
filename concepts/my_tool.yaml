@@ -3,27 +3,33 @@ identity:
   name: My Tool
   type: Code
 purpose:
-  solves: "Testing GDES"
-  without_this: "Cannot test"
-  success_signal: "Works"
+  solves: Testing GDES
+  without_this: Cannot test
+  success_signal: Works
 placement:
   layer: Input
-  upstream: ["Human"]
-  downstream: ["Output"]
+  upstream:
+  - Human
+  downstream:
+  - Output
 contract:
   allowed_types:
-    - code
-    - snippet
-    - config
+  - code
+  - snippet
+  - config
   input:
-    format: "text"
+    format: text
   output:
-    format: "json"
+    format: json
 responsibilities:
-  - "Generate code"
-  - "Store safely"
+- Generate code
+- Store safely
 boundaries:
   explicitly_forbidden:
-    - "database_persistence"
+  - database_persistence
   drift_warnings:
-    - "Do not add web server"
+  - Do not add web server
+meta:
+  extends: null
+  abstract: false
+  version: 1.8.0

@@ -14,6 +14,8 @@ from .concept_c import Validator
 from .concept_d import Registry
 from .core import AuditLogger, Config
 from .artifact import CanonicalArtifact, PartialArtifact, ValidationReport
+from .validators.relationship_schema import RelationshipValidator
+from .persistence.staging_lock import staging_lock, StagingConcurrencyError
 
 
 T = TypeVar("T")
@@ -478,8 +480,9 @@ def cli_export_all(output_file):
 @cli.command(name="link")
 @click.argument("artifact_id")
 @click.argument("related_id")
-def link_artifacts(artifact_id, related_id):
-    """Add reference from artifact_id to related_id (V1.6 with validation)"""
+@click.option("--relation", default=None, help="Relation type (e.g. compliance, audit, depends_on)")
+def link_artifacts(artifact_id, related_id, relation):
+    """Add reference from artifact_id to related_id (V1.7.2 with concept-type validation)"""
     from src.concept_d import Registry
     from src.core import Config
     from src.linking import validate_references, get_links, add_reference
@@ -496,6 +499,27 @@ def link_artifacts(artifact_id, related_id):
     related = next((a for a in all_artifacts if a.id == related_id), None)
     if not related:
         raise click.ClickException(f"Related artifact {related_id} not found")
+    
+    # Concept-type relationship validation (V1.7.2 wiring)
+    rel_validator = RelationshipValidator(strict=True)
+    source_concept = artifact.concept
+    target_concept = related.concept
+    
+    if relation is None:
+        valid_targets = rel_validator.get_valid_targets(source_concept)
+        if target_concept in valid_targets:
+            relation = valid_targets[target_concept][0]
+            click.echo(f"  ℹ️  Auto-selected relation: '{relation}'")
+        else:
+            raise click.ClickException(
+                f"No schema defined for {source_concept} → {target_concept}. "
+                f"Use --relation with an explicit type, or define the pair in RELATIONSHIP_SCHEMA."
+            )
+    
+    try:
+        rel_validator.validate(source_concept, target_concept, relation)
+    except ValueError as e:
+        raise click.ClickException(str(e))
     
     # Convert to dict for linking validation
     art_dict = _artifact_to_dict(artifact)
@@ -517,9 +541,14 @@ def link_artifacts(artifact_id, related_id):
     except ValueError as e:
         raise click.ClickException(str(e))
     
-    # Store updated refs
+    # Store updated refs + typed relation for V1.8+ traceability
     updated_meta = dict(artifact.metadata)
     updated_meta["related_to"] = updated.get("related_to", [])
+    
+    # Backward-compatible: relation_types is new, related_to stays flat for graph traversal
+    if "relation_types" not in updated_meta:
+        updated_meta["relation_types"] = {}
+    updated_meta["relation_types"][related_id] = relation
     
     with registry._connect() as conn:
         conn.execute(
@@ -528,7 +557,7 @@ def link_artifacts(artifact_id, related_id):
         )
         conn.commit()
     
-    click.echo(f"Linked {artifact_id} → {related_id}")
+    click.echo(f"Linked {artifact_id} → {related_id} ({relation})")
 
 @cli.command(name="refs")
 @click.argument("artifact_id")
@@ -565,16 +594,6 @@ from src.linking import validate_references, get_links, add_reference
 
 
 def _artifact_to_dict(artifact):
-    """Convert CanonicalArtifact to dict for linking.py"""
-    return {
-        "id": artifact.id,
-        "concept": artifact.concept,
-        "type": artifact.artifact_type,
-        "content_hash": getattr(artifact, 'content_hash', ''),
-        "created_at": str(artifact.created_at),
-        "metadata": artifact.metadata,
-        "related_to": artifact.metadata.get("related_to", [])
-    }
     """Convert CanonicalArtifact to dict for linking.py"""
     return {
         "id": artifact.id,

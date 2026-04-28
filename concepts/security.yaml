@@ -1,29 +1,33 @@
 concept_id: security
 identity:
-  name: "Security"
+  name: Security
   type: Domain
 purpose:
-  solves: "Track security incidents and policies"
-  without_this: "Missed threats, slow response"
-  success_signal: "Documented incidents, enforced policies"
+  solves: Track security incidents and policies
+  without_this: Missed threats, slow response
+  success_signal: Documented incidents, enforced policies
 placement:
   layer: Domain
   upstream: []
   downstream: []
 contract:
   allowed_types:
-    - incident_report
-    - alert
-    - policy
+  - incident_report
+  - alert
+  - policy
   input:
-    format: "text"
+    format: text
   output:
-    format: "structured_data"
+    format: structured_data
 responsibilities:
-  - "Log security events"
-  - "Track incident response"
+- Log security events
+- Track incident response
 boundaries:
   explicitly_forbidden:
-    - "active_threat_response"
+  - active_threat_response
   drift_warnings:
-    - "Do not add automatic blocking"
+  - Do not add automatic blocking
+meta:
+  extends: null
+  abstract: false
+  version: 1.8.0

@@ -3,30 +3,36 @@ identity:
   name: Test Suite
   type: Test
 purpose:
-  solves: "Verify code behavior automatically"
-  without_this: "Manual testing, regression bugs"
-  success_signal: "Tests pass, coverage reported"
+  solves: Verify code behavior automatically
+  without_this: Manual testing, regression bugs
+  success_signal: Tests pass, coverage reported
 placement:
   layer: Validation
-  upstream: ["my_tool"]
-  downstream: ["my_tool"]
+  upstream:
+  - my_tool
+  downstream:
+  - my_tool
 contract:
   allowed_types:
-    - python_test
-    - pytest_case
+  - python_test
+  - pytest_case
   input:
-    format: "python_code"
+    format: python_code
   output:
-    format: "test_results"
+    format: test_results
 responsibilities:
-  - "Define test cases"
-  - "Assert expected behavior"
-  - "Report pass/fail status"
+- Define test cases
+- Assert expected behavior
+- Report pass/fail status
 boundaries:
   explicitly_forbidden:
-    - "production_data"
-    - "external_api_calls"
-    - "filesystem_mutation"
+  - production_data
+  - external_api_calls
+  - filesystem_mutation
   drift_warnings:
-    - "Do not mock internal implementation"
-    - "Do not skip error handling tests"
+  - Do not mock internal implementation
+  - Do not skip error handling tests
+meta:
+  extends: null
+  abstract: false
+  version: 1.8.0

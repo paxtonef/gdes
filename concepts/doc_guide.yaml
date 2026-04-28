@@ -3,28 +3,34 @@ identity:
   name: Documentation Guide
   type: Documentation
 purpose:
-  solves: "Explain system architecture"
-  without_this: "Users cannot understand GDES"
-  success_signal: "Clear explanation produced"
+  solves: Explain system architecture
+  without_this: Users cannot understand GDES
+  success_signal: Clear explanation produced
 placement:
   layer: Output
-  upstream: ["my_tool"]
-  downstream: ["Human"]
+  upstream:
+  - my_tool
+  downstream:
+  - Human
 contract:
   allowed_types:
-    - markdown
-    - text
+  - markdown
+  - text
   input:
-    format: "markdown"
+    format: markdown
   output:
-    format: "markdown"
+    format: markdown
 responsibilities:
-  - "Explain concepts"
-  - "Document boundaries"
+- Explain concepts
+- Document boundaries
 boundaries:
   explicitly_forbidden:
-    - "code_execution"
-    - "database_persistence"
+  - code_execution
+  - database_persistence
   drift_warnings:
-    - "Do not add CLI commands"
-    - "Do not include implementation code"
+  - Do not add CLI commands
+  - Do not include implementation code
+meta:
+  extends: null
+  abstract: false
+  version: 1.8.0
